@@ -1,5 +1,13 @@
 [![Coverage Status](https://coveralls.io/repos/github/rapidpro/rapidpro/badge.svg?branch=master)](https://coveralls.io/github/rapidpro/rapidpro?branch=master)
 
+# Startup
+
+After cloining
+
+    sudo apt-get install libncurses5-dev libffi-dev libssl-dev redis-server coffeescript node-less
+    virtualenv env
+    pip install -r pip-freeze.txt
+    
 # RapidPro     
 
 RapidPro is a hosted service for visually building interactive messaging applications.
