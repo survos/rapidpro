@@ -263,6 +263,26 @@ LOGGING = {
 # Branding Configuration
 # -----------------------------------------------------------------------------------
 BRANDING = {
+    'survos.io': {
+        'slug': 'survos',
+        'name': 'Survos',
+        'org': 'Survos LLC',
+        'styles': ['brands/rapidpro/font/style.css', 'brands/survos/less/style.less'],
+        'welcome_topup': 1000,
+        'email': 'join@survos.net',
+        'support_email': 'support@survos.net',
+        'link': 'https://rapidpro.survos.net',
+        'api_link': 'https://api.survos.net',
+        'docs_link': 'http://knowledge.rapidpro.io',
+        'domain': 'rapidpro.survos.net',
+        'favico': 'brands/survos/favico.ico',
+        'splash': '/brands/survos/splash.jpg',
+        'logo': '/brands/survos/logo.png',
+        'allow_signups': True,
+        'welcome_packs': [dict(size=5000, name="Demo Account"), dict(size=100000, name="Survos Client")],
+        'description': _("Build scheduled SMS surveys to interact with your study participants"),
+        'credits': _("RapidPro is Copyright &copy; 2012-2015 UNICEF, Nyaruka. All Rights Reserved.  Some modification by Survos LLC")
+    },
     'rapidpro.io': {
         'slug': 'rapidpro',
         'name': 'RapidPro',
@@ -284,7 +304,7 @@ BRANDING = {
         'credits': _("Copyright &copy; 2012-2015 UNICEF, Nyaruka. All Rights Reserved.")
     }
 }
-DEFAULT_BRAND = 'rapidpro.io'
+DEFAULT_BRAND = 'survos.io'
 
 # -----------------------------------------------------------------------------------
 # Directory Configuration
