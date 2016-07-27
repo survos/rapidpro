@@ -154,7 +154,8 @@
     .org-header
       .org
         %a{href:'javascript:void(0);'}
-          {{ user_org.name }}
+          %span.org-name {{ user_org.name }}
+          %span.user-name {{ user.first_name }} {{ user.last_name }}
 
       .other-orgs.hide
 

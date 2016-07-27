@@ -267,7 +267,7 @@ BRANDING = {
         'slug': 'survos',
         'name': 'Survos',
         'org': 'Survos LLC',
-        'styles': ['brands/rapidpro/font/style.css', 'brands/survos/less/style.less'],
+        'styles': ['brands/survos/font/style.css', 'brands/survos/less/style.less'],
         'welcome_topup': 1000,
         'email': 'join@survos.net',
         'support_email': 'support@survos.net',
