@@ -38,13 +38,13 @@ POSTGIS_VERSION = (2, 1)
 # if your site was at http://temba.io, it might look like this:
 # -----------------------------------------------------------------------------------
 EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_HOST_USER = 'server@temba.io'
-DEFAULT_FROM_EMAIL = 'server@temba.io'
+EMAIL_HOST_USER = 'tac@survos.com'
+DEFAULT_FROM_EMAIL = 'tac@survos.com'
 EMAIL_HOST_PASSWORD = 'mypassword'
 EMAIL_USE_TLS = True
 
 # where recordings and exports are stored
-AWS_STORAGE_BUCKET_NAME = 'dl-temba-io'
+AWS_STORAGE_BUCKET_NAME = 'dl-survos'
 AWS_BUCKET_DOMAIN = AWS_STORAGE_BUCKET_NAME + '.s3.amazonaws.com'
 STORAGE_ROOT_DIR = 'test_orgs' if TESTING else 'orgs'
 
@@ -56,7 +56,7 @@ STORAGE_ROOT_DIR = 'test_orgs' if TESTING else 'orgs'
 # -----------------------------------------------------------------------------------
 USE_TZ = True
 TIME_ZONE = 'GMT'
-USER_TIME_ZONE = 'Africa/Kigali'
+USER_TIME_ZONE = 'America/New_York'
 
 MODELTRANSLATION_TRANSLATION_REGISTRY = "translation"
 
@@ -81,7 +81,7 @@ SITE_ID = 1
 
 # If you set this to False, Django will make some optimizations so as not
 # to load the internationalization machinery.
-USE_I18N = True
+USE_I18N = False
 
 # If you set this to False, Django will not format dates, numbers and
 # calendars according to the current locale
@@ -101,7 +101,7 @@ STATICFILES_FINDERS = (
 )
 
 # Make this unique, and don't share it with anybody.
-SECRET_KEY = 'your own secret key'
+SECRET_KEY = 'survos rapidpro secret key'
 
 # List of callables that know how to import templates from various sources.
 TEMPLATE_LOADERS = (
