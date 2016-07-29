@@ -1,0 +1,14 @@
+[Unit]
+Description=Celery Service
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/rapidpro
+ExecStart=/var/www/rapidpro/env/bin/python manage.py celery worker --beat --loglevel info
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s TERM $MAINPID
+
+[Install]
+WantedBy=multi-user.target
