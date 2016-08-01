@@ -911,7 +911,7 @@ CELERYBEAT_SCHEDULE = {
     },
     "check-channels": {
         'task': 'check_channels_task',
-        'schedule': timedelta(seconds=300),
+        'schedule': timedelta(seconds=60),
     },
     "schedules": {
         'task': 'check_schedule_task',
@@ -929,9 +929,10 @@ CELERYBEAT_SCHEDULE = {
         'task': 'check_credits_task',
         'schedule': timedelta(seconds=900)
     },
+    # sending messages, inside call send_msg_task
     "check-messages-task": {
         'task': 'check_messages_task',
-        'schedule': timedelta(seconds=300)
+        'schedule': timedelta(seconds=60)
     },
     "fail-old-messages": {
         'task': 'fail_old_messages',
