@@ -8,7 +8,7 @@ PIDFile=/run/gunicorn/pid
 User=www-data
 Group=www-data
 WorkingDirectory=/var/www/rapidpro
-ExecStart=/var/www/rapidpro/env/bin/gunicorn --pid /run/gunicorn/pidi --workers 5 --max-requests=1000 temba.wsgi:application
+ExecStart=/var/www/rapidpro/env/bin/gunicorn --pid /run/gunicorn/pid --workers 5 --max-requests=1000 temba.wsgi:application
 ExecReload=/bin/kill -s HUP $MAINPID
 ExecStop=/bin/kill -s TERM $MAINPID
 PrivateTmp=true
