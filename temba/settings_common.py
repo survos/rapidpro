@@ -199,6 +199,9 @@ INSTALLED_APPS = (
     # django-timezones
     'timezones',
 
+    # django-extensions
+    'django_extensions',
+
     # sentry
     'raven.contrib.django',
     'raven.contrib.django.celery',
