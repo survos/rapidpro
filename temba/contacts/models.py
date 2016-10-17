@@ -17,6 +17,7 @@ from django.db.models import Count, Max, Q, Sum
 from django.utils import timezone
 from django.utils.translation import ugettext, ugettext_lazy as _
 from guardian.utils import get_anonymous_user
+from itertools import chain
 from redis_cache import get_redis_connection
 from smartmin.models import SmartModel, SmartImportRowError
 from smartmin.csv_imports.models import ImportTask
@@ -116,14 +117,11 @@ class URN(object):
             return False
 
         if scheme == TEL_SCHEME:
-            if country_code:
-                try:
-                    normalized = phonenumbers.parse(path, country_code)
-                    return phonenumbers.is_possible_number(normalized)
-                except Exception:
-                    return False
-
-            return True  # if we don't have a channel with country, we can't for now validate tel numbers
+            try:
+                parsed = phonenumbers.parse(path, country_code)
+                return phonenumbers.is_possible_number(parsed)
+            except Exception:
+                return False
 
         # validate twitter URNs look like handles
         elif scheme == TWITTER_SCHEME:
@@ -185,7 +183,7 @@ class URN(object):
         number = regex.sub('[^0-9a-z\+]', '', number.lower(), regex.V0)
 
         # add on a plus if it looks like it could be a fully qualified number
-        if len(number) >= 11 and number[0] != '+':
+        if len(number) >= 11 and number[0] not in ['+', '0']:
             number = '+' + number
 
         normalized = None
@@ -235,11 +233,14 @@ class ContactField(SmartModel):
     """
     Represents a type of field that can be put on Contacts.
     """
+    MAX_KEY_LEN = 36
+    MAX_LABEL_LEN = 36
+
     org = models.ForeignKey(Org, verbose_name=_("Org"), related_name="contactfields")
 
-    label = models.CharField(verbose_name=_("Label"), max_length=36)
+    label = models.CharField(verbose_name=_("Label"), max_length=MAX_LABEL_LEN)
 
-    key = models.CharField(verbose_name=_("Key"), max_length=36)
+    key = models.CharField(verbose_name=_("Key"), max_length=MAX_KEY_LEN)
 
     value_type = models.CharField(choices=Value.TYPE_CHOICES, max_length=1, default=Value.TYPE_TEXT,
                                   verbose_name="Field Type")
@@ -255,12 +256,12 @@ class ContactField(SmartModel):
 
     @classmethod
     def is_valid_key(cls, key):
-        return regex.match(r'^[a-z][a-z0-9_]*$', key, regex.V0) and key not in Contact.RESERVED_FIELDS
+        return regex.match(r'^[a-z][a-z0-9_]*$', key, regex.V0) and key not in Contact.RESERVED_FIELDS and len(key) <= cls.MAX_KEY_LEN
 
     @classmethod
     def is_valid_label(cls, label):
         label = label.strip()
-        return regex.match(r'^[A-Za-z0-9\- ]+$', label, regex.V0)
+        return regex.match(r'^[A-Za-z0-9\- ]+$', label, regex.V0) and len(label) <= cls.MAX_LABEL_LEN
 
     @classmethod
     def hide_field(cls, org, user, key):
@@ -286,6 +287,14 @@ class ContactField(SmartModel):
 
         with org.lock_on(OrgLock.field, key):
             field = ContactField.objects.filter(org=org, key__iexact=key).first()
+
+            if not field:
+                # try to lookup the existing field by label
+                field = ContactField.get_by_label(org, label)
+
+            # we have a field with a invalid key we should ignore it
+            if field and not ContactField.is_valid_key(field.key):
+                field = None
 
             if field:
                 update_events = False
@@ -408,7 +417,7 @@ class Contact(TembaModel):
         return self.all_groups.filter(group_type=ContactGroup.TYPE_USER_DEFINED)
 
     def as_json(self):
-        obj = dict(id=self.pk, name=unicode(self))
+        obj = dict(id=self.pk, name=unicode(self), uuid=self.uuid)
 
         if not self.org.is_anon:
             urns = []
@@ -450,6 +459,50 @@ class Contact(TembaModel):
             Q(contacts__in=[self]) | Q(urns__in=contact_urns) | Q(groups__in=contact_groups))
 
         return scheduled_broadcasts.order_by('schedule__next_fire')
+
+    def get_activity(self, after, before):
+        """
+        Gets this contact's activity of messages, calls, runs etc in the given time window
+        """
+        from temba.flows.models import Flow
+        from temba.ivr.models import BUSY, FAILED, NO_ANSWER, CANCELED
+        from temba.msgs.models import Msg
+
+        msgs = Msg.objects.filter(contact=self, created_on__gte=after, created_on__lt=before)
+        msgs = msgs.exclude(visibility=Msg.VISIBILITY_DELETED).select_related('channel').prefetch_related('channel_logs')
+
+        # we also include in the timeline purged broadcasts with a best guess at the translation used
+        broadcasts = self.broadcasts.filter(purged=True).filter(created_on__gte=after, created_on__lt=before)
+        broadcasts = broadcasts.prefetch_related('steps__run__flow')
+        for broadcast in broadcasts:
+            steps = list(broadcast.steps.all())
+            flow = steps[0].run.flow if steps else None
+            flow_language = flow.base_language if flow else None
+            broadcast.translated_text = broadcast.get_translated_text(contact=self,
+                                                                      base_language=flow_language,
+                                                                      org=self.org)
+
+        # and all of this contact's runs, channel events such as missed calls, scheduled events
+        runs = self.runs.filter(created_on__gte=after, created_on__lt=before).exclude(flow__flow_type=Flow.MESSAGE)
+        runs = runs.select_related('flow')
+
+        channel_events = self.channel_events.filter(created_on__gte=after, created_on__lt=before)
+        channel_events = channel_events.select_related('channel')
+
+        event_fires = self.fire_events.filter(fired__gte=after, fired__lt=before).exclude(fired=None)
+        event_fires = event_fires.select_related('event__campaign')
+
+        # for easier comparison and display - give event fires same time attribute as other activity items
+        for event_fire in event_fires:
+            event_fire.created_on = event_fire.fired
+
+        # and the contact's failed IVR calls
+        error_calls = self.calls.filter(created_on__gte=after, created_on__lt=before, status__in=[BUSY, FAILED, NO_ANSWER, CANCELED])
+        error_calls = error_calls.select_related('channel')
+
+        # chain them all together in the same list and sort by time
+        activity = chain(msgs, broadcasts, runs, event_fires, channel_events, error_calls)
+        return sorted(activity, key=lambda i: i.created_on, reverse=True)
 
     def get_field(self, key):
         """
@@ -662,6 +715,10 @@ class Contact(TembaModel):
 
         contact = None
 
+        # limit our contact name to 128 chars
+        if name:
+            name = name[:128]
+
         # optimize the single URN contact lookup case with an existing contact, this doesn't need a lock as
         # it is read only from a contacts perspective, but it is by far the most common case
         if not uuid and not name and urns and len(urns) == 1:
@@ -768,7 +825,7 @@ class Contact(TembaModel):
 
             # add all new URNs
             for raw, normalized in urns_to_create.iteritems():
-                urn = ContactURN.create(org, contact, normalized, channel=channel)
+                urn = ContactURN.get_or_create(org, contact, normalized, channel=channel)
                 urn_objects[raw] = urn
 
             # save which urns were updated
@@ -874,6 +931,8 @@ class Contact(TembaModel):
             if not value:
                 continue
 
+            value = str(value)
+
             urn_scheme = ContactURN.IMPORT_HEADER_TO_SCHEME[urn_header]
 
             if urn_scheme == TEL_SCHEME:
@@ -892,7 +951,11 @@ class Contact(TembaModel):
                 (normalized, is_valid) = URN.normalize_number(value, country)
 
                 if not is_valid:
-                    raise SmartImportRowError("Invalid Phone number %s" % value)
+                    error_msg = "Invalid Phone number %s" % value
+                    if not country:
+                        error_msg = "Invalid Phone number or no country code specified for %s" % value
+
+                    raise SmartImportRowError(error_msg)
 
                 # in the past, test contacts have ended up in exports. Don't re-import them
                 if value == OLD_TEST_CONTACT_TEL:
@@ -1028,8 +1091,87 @@ class Contact(TembaModel):
             raise Exception(ugettext('The file you provided is missing a required header called "Name".'))
 
     @classmethod
+    def normalize_value(cls, val):
+        if isinstance(val, str) or isinstance(val, unicode):
+            return SmartModel.normalize_value(val)
+        return val
+
+    @classmethod
+    def import_excel(cls, filename, user, import_params, log=None, import_results=None):
+
+        import pyexcel
+        sheet_data = pyexcel.get_array(file_name=filename.name)
+
+        line_number = 0
+
+        header = sheet_data[line_number]
+        line_number += 1
+        while header is not None and len(header[0]) > 1 and header[0][0] == "#":
+            header = sheet_data[line_number]
+            line_number += 1
+
+        # do some sanity checking to make sure they uploaded the right kind of file
+        if len(header) < 1:
+            raise Exception("Invalid header for import file")
+
+        # normalize our header names, removing quotes and spaces
+        header = [cls.normalize_value(str(cell_value)).lower() for cell_value in header]
+
+        cls.validate_import_header(header)
+
+        records = []
+        num_errors = 0
+        error_messages = []
+
+        sheet_data_records = sheet_data[line_number:]
+
+        for row in sheet_data_records:
+            # trim all our values
+            row_data = []
+            for cell in row:
+                cell_value = cls.normalize_value(cell)
+                if not isinstance(cell_value, datetime.date) and not isinstance(cell_value, datetime.datetime):
+                    cell_value = unicode(cell_value)
+                row_data.append(cell_value)
+
+            line_number += 1
+
+            # make sure there are same number of fields
+            if len(row_data) != len(header):
+                raise Exception("Line %d: The number of fields for this row is incorrect. Expected %d but found %d." % (line_number, len(header), len(row_data)))
+
+            field_values = dict(zip(header, row_data))
+            log_field_values = field_values.copy()
+            field_values['created_by'] = user
+            field_values['modified_by'] = user
+            try:
+
+                field_values = cls.prepare_fields(field_values, import_params, user)
+                record = cls.create_instance(field_values)
+                if record:
+                    records.append(record)
+                else:
+                    num_errors += 1
+
+            except SmartImportRowError as e:
+                error_messages.append(dict(line=line_number, error=str(e)))
+
+            except Exception as e:
+                if log:
+                    import traceback
+                    traceback.print_exc(100, log)
+                raise Exception("Line %d: %s\n\n%s" % (line_number, str(e), str(log_field_values)))
+
+        if import_results is not None:
+            import_results['records'] = len(records)
+            import_results['errors'] = num_errors + len(error_messages)
+            import_results['error_messages'] = error_messages
+
+        return records
+
+    @classmethod
     def import_csv(cls, task, log=None):
-        from xlrd import XLRDError
+        import pyexcel
 
         filename = task.csv_file.file
         user = task.created_by
@@ -1053,21 +1195,29 @@ class Contact(TembaModel):
             pass
 
         # rewrite our file to local disk
-        tmp_file = os.path.join(settings.MEDIA_ROOT, 'tmp/%s' % str(uuid4()))
+        extension = filename.name.rpartition('.')[2]
+        tmp_file = os.path.join(settings.MEDIA_ROOT, 'tmp/%s.%s' % (str(uuid4()), extension))
         filename.open()
 
         out_file = open(tmp_file, 'w')
         out_file.write(filename.read())
         out_file.close()
 
+        # convert the file to CSV
+        csv_tmp_file = os.path.join(settings.MEDIA_ROOT, 'tmp/%s.csv' % str(uuid4()))
+
+        pyexcel.save_as(file_name=out_file.name, dest_file_name=csv_tmp_file)
+
         import_results = dict()
 
         try:
-            contacts = cls.import_xls(open(tmp_file), user, import_params, log, import_results)
-        except XLRDError:
-            contacts = cls.import_raw_csv(open(tmp_file), user, import_params, log, import_results)
+            contacts = cls.import_excel(open(tmp_file), user, import_params, log, import_results)
         finally:
             os.remove(tmp_file)
+            os.remove(csv_tmp_file)
+
+        # save the import results even if no record was created
+        task.import_results = json.dumps(import_results)
 
         # don't create a group if there are no contacts
         if not contacts:
@@ -1112,6 +1262,7 @@ class Contact(TembaModel):
                 # if we fail to parse phone numbers for any reason just punt
                 pass
 
+        # overwrite the import results for adding the counts
         import_results['creates'] = num_creates
         import_results['updates'] = len(contacts) - num_creates
         task.import_results = json.dumps(import_results)
@@ -1285,7 +1436,7 @@ class Contact(TembaModel):
         contact_dict = dict(__default__=self.get_display(org=org))
         contact_dict[Contact.NAME] = self.name if self.name else ''
         contact_dict[Contact.FIRST_NAME] = self.first_name(org)
-        contact_dict['tel_e164'] = self.get_urn_display(scheme=TEL_SCHEME, org=org, full=True)
+        contact_dict['tel_e164'] = self.get_urn_display(scheme=TEL_SCHEME, org=org, formatted=False)
         contact_dict['groups'] = ",".join([_.name for _ in self.user_groups.all()])
         contact_dict['uuid'] = self.uuid
         contact_dict[Contact.LANGUAGE] = self.language
@@ -1332,6 +1483,10 @@ class Contact(TembaModel):
         Sets the preferred channel for communicating with this Contact
         """
         if channel is None:
+            return
+
+        # don't set preferred channels for test contacts
+        if self.is_test:
             return
 
         urns = self.get_urns()
@@ -1494,7 +1649,7 @@ class Contact(TembaModel):
         for group in self.user_groups.all():
             group.remove_contacts(user, [self])
 
-    def get_display(self, org=None, full=False, short=False):
+    def get_display(self, org=None, formatted=True, short=False):
         """
         Gets a displayable name or URN for the contact. If available, org can be provided to avoid having to fetch it
         again based on the contact.
@@ -1507,11 +1662,11 @@ class Contact(TembaModel):
         elif org.is_anon:
             res = self.anon_identifier
         else:
-            res = self.get_urn_display(org=org, full=full)
+            res = self.get_urn_display(org=org, formatted=formatted)
 
         return truncate(res, 20) if short else res
 
-    def get_urn_display(self, org=None, scheme=None, full=False):
+    def get_urn_display(self, org=None, scheme=None, formatted=True, international=False):
         """
         Gets a displayable URN for the contact. If available, org can be provided to avoid having to fetch it again
         based on the contact.
@@ -1523,7 +1678,7 @@ class Contact(TembaModel):
             return self.anon_identifier
 
         urn = self.get_urn(scheme)
-        return urn.get_display(org=org, full=full) if urn else ''
+        return urn.get_display(org=org, formatted=formatted, international=international) if urn else ''
 
     def raw_tel(self):
         tel = self.get_urn(TEL_SCHEME)
@@ -1531,14 +1686,14 @@ class Contact(TembaModel):
             return tel.path
 
     def send(self, text, user, trigger_send=True, response_to=None, message_context=None):
-        from temba.msgs.models import Broadcast
-        broadcast = Broadcast.create(self.org, user, text, [self])
-        broadcast.send(trigger_send=trigger_send, message_context=message_context)
+        from temba.msgs.models import Msg
 
-        if response_to and response_to.id > 0:
-            broadcast.get_messages().update(response_to=response_to)
+        msg = Msg.create_outgoing(self.org, user, self, text, priority=Msg.PRIORITY_HIGH,
+                                  response_to=response_to, message_context=message_context)
+        if trigger_send:
+            self.org.trigger_send([msg])
 
-        return broadcast
+        return msg
 
     def __unicode__(self):
         return self.get_display()
@@ -1663,7 +1818,7 @@ class ContactURN(models.Model):
         except Exception:
             return None
 
-    def get_display(self, org=None, full=False):
+    def get_display(self, org=None, international=False, formatted=True):
         """
         Gets a representation of the URN for display
         """
@@ -1673,12 +1828,16 @@ class ContactURN(models.Model):
         if org.is_anon:
             return self.ANON_MASK
 
-        if self.scheme == TEL_SCHEME and not full:
+        if self.scheme == TEL_SCHEME and formatted:
             # if we don't want a full tell, see if we can show the national format instead
             try:
                 if self.path and self.path[0] == '+':
-                    return phonenumbers.format_number(phonenumbers.parse(self.path, None),
-                                                      phonenumbers.PhoneNumberFormat.NATIONAL)
+                    phone_format = phonenumbers.PhoneNumberFormat.NATIONAL
+                    if international:
+                        phone_format = phonenumbers.PhoneNumberFormat.INTERNATIONAL
+
+                    return phonenumbers.format_number(phonenumbers.parse(self.path, None), phone_format)
+
             except Exception:  # pragma: no cover
                 pass
 
@@ -1760,11 +1919,11 @@ class ContactGroup(TembaModel):
         return groups
 
     @classmethod
-    def get_or_create(cls, org, user, name, group_id=None):
+    def get_or_create(cls, org, user, name, group_uuid=None):
         existing = None
 
-        if group_id is not None:
-            existing = ContactGroup.user_groups.filter(org=org, id=group_id).first()
+        if group_uuid is not None:
+            existing = ContactGroup.user_groups.filter(org=org, uuid=group_uuid).first()
 
         if not existing:
             existing = ContactGroup.get_user_group(org, name)
@@ -1835,7 +1994,7 @@ class ContactGroup(TembaModel):
         """
         Manually adds or removes contacts from a static group. Returns contact ids of contacts whose membership changed.
         """
-        if self.group_type != self.TYPE_USER_DEFINED or self.is_dynamic:
+        if self.group_type != self.TYPE_USER_DEFINED or self.is_dynamic:  # pragma: no cover
             raise ValueError("Can't add or remove contacts from system or dynamic groups")
 
         return self._update_contacts(user, contacts, add)
@@ -1844,7 +2003,7 @@ class ContactGroup(TembaModel):
         """
         Re-evaluates whether contacts belong in a dynamic group. Returns contacts whose membership changed.
         """
-        if self.group_type != self.TYPE_USER_DEFINED or not self.is_dynamic:
+        if self.group_type != self.TYPE_USER_DEFINED or not self.is_dynamic:  # pragma: no cover
             raise ValueError("Can't re-evaluate contacts against system or static groups")
 
         user = get_anonymous_user()
@@ -1860,7 +2019,7 @@ class ContactGroup(TembaModel):
         """
         Forces removal of contacts from this group regardless of whether it is static or dynamic
         """
-        if self.group_type != self.TYPE_USER_DEFINED:
+        if self.group_type != self.TYPE_USER_DEFINED:  # pragma: no cover
             raise ValueError("Can't remove contacts from system groups")
 
         return self._update_contacts(user, contacts, add=False)
@@ -2016,8 +2175,6 @@ class ContactGroupCount(models.Model):
         start = time.time()
         squash_count = 0
         for count in ContactGroupCount.objects.filter(id__gt=last_squash).order_by('group_id').distinct('group_id'):
-            print "Squashing: %d" % count.group_id
-
             # perform our atomic squash in SQL by calling our squash method
             with connection.cursor() as c:
                 c.execute("SELECT temba_squash_contactgroupcounts(%s);", (count.group_id,))
@@ -2059,7 +2216,6 @@ class ExportContactsTask(SmartModel):
 
     org = models.ForeignKey(Org, related_name='contacts_exports', help_text=_("The Organization of the user."))
     group = models.ForeignKey(ContactGroup, null=True, related_name='exports', help_text=_("The unique group to export"))
-    host = models.CharField(max_length=32, help_text=_("The host this export task was created on"))
     task_id = models.CharField(null=True, max_length=64)
     is_finished = models.BooleanField(default=False,
                                       help_text=_("Whether this export has completed"))
@@ -2164,7 +2320,7 @@ class ExportContactsTask(SmartModel):
                             position = field['position']
                             if len(scheme_urns) > position:
                                 urn_obj = scheme_urns[position]
-                                field_value = urn_obj.get_display(org=self.org, full=True) if urn_obj else ''
+                                field_value = urn_obj.get_display(org=self.org, formatted=False) if urn_obj else ''
                             else:
                                 field_value = ''
                         else:
@@ -2204,10 +2360,9 @@ class ExportContactsTask(SmartModel):
         self.save(update_fields=['uuid'])
 
         store = AssetType.contact_export.store
-        store.save(self.pk, File(table_file), 'csv' if exporter.is_csv else 'xls')
+        store.save(self.pk, File(table_file), 'csv' if exporter.is_csv else 'xlsx')
 
-        from temba.middleware import BrandingMiddleware
-        branding = BrandingMiddleware.get_branding_for_host(self.host)
+        branding = self.org.get_branding()
         download_url = branding['link'] + get_asset_url(AssetType.contact_export, self.pk)
 
         subject = "Your contacts export is ready"

@@ -8,6 +8,7 @@ import datetime
 import locale
 import resource
 
+import regex
 from dateutil.parser import parse
 from decimal import Decimal
 from django.conf import settings
@@ -16,6 +17,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.utils.timezone import is_aware
 from django.http import HttpResponse
+from django_countries import countries
 from itertools import islice
 
 DEFAULT_DATE = timezone.now().replace(day=1, month=1, year=1)
@@ -39,6 +41,13 @@ INITIAL_TIMEZONE_COUNTRY = {
     'Canada/Newfoundland': 'CA',
     'GMT': '',
     'UTC': ''
+}
+
+
+TRANSFERTO_COUNTRY_NAMES = {
+    'Democratic Republic of the Congo': 'CD',
+    'Ivory Coast': 'CI',
+    'United States': 'US',
 }
 
 
@@ -480,3 +489,25 @@ def print_max_mem_usage(msg=None):
     print "=" * 80
     print msg + locale.format("%d", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, grouping=True)
     print "=" * 80
+
+
+def get_country_code_by_name(name):
+    code = countries.by_name(name)
+
+    if not code:
+        code = TRANSFERTO_COUNTRY_NAMES.get(name, None)
+
+    return code if code else None
+
+
+def remove_control_characters(str):
+    if str is None:
+        return str
+
+    rexp = regex.compile(r'[\000-\010]|[\013-\014]|[\016-\037]', flags=regex.MULTILINE | regex.UNICODE | regex.V0)
+
+    matches = 1
+    while matches:
+        (str, matches) = rexp.subn('', str)
+
+    return str

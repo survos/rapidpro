@@ -9,7 +9,7 @@ from django.contrib.auth.models import User
 from django.utils.translation import ugettext_lazy as _
 from rest_framework import serializers
 from temba.campaigns.models import Campaign, CampaignEvent
-from temba.channels.models import Channel, ChannelEvent, SEND
+from temba.channels.models import Channel, ChannelEvent
 from temba.contacts.models import Contact, ContactField, ContactGroup, ContactURN, URN, TEL_SCHEME
 from temba.flows.models import Flow, FlowRun, FlowStep, RuleSet, FlowRevision
 from temba.locations.models import AdminBoundary
@@ -252,7 +252,7 @@ class MsgBulkActionSerializer(WriteSerializer):
         action = self.validated_data['action']
 
         # fetch messages to be modified
-        msgs = Msg.current_messages.filter(org=self.org, direction=INCOMING, pk__in=msg_ids).exclude(visibility=Msg.VISIBILITY_DELETED)
+        msgs = Msg.objects.filter(org=self.org, direction=INCOMING, pk__in=msg_ids).exclude(visibility=Msg.VISIBILITY_DELETED)
         msgs = msgs.select_related('contact')
 
         if action == 'label':
@@ -375,7 +375,7 @@ class ContactReadSerializer(ReadSerializer):
         return fields
 
     def get_tel(self, obj):
-        return obj.get_urn_display(obj.org, scheme=TEL_SCHEME, full=True) if obj.is_active else None
+        return obj.get_urn_display(obj.org, scheme=TEL_SCHEME, formatted=False) if obj.is_active else None
 
     class Meta:
         model = Contact
@@ -425,7 +425,9 @@ class ContactWriteSerializer(WriteSerializer):
             for urn in value:
                 try:
                     normalized = URN.normalize(urn)
-                    if not URN.validate(normalized):
+                    scheme, path = URN.to_parts(normalized)
+                    # for backwards compatibility we don't validate phone numbers here
+                    if scheme != TEL_SCHEME and not URN.validate(normalized):
                         raise ValueError()
                 except ValueError:
                     raise serializers.ValidationError("Invalid URN: '%s'" % urn)
@@ -439,6 +441,8 @@ class ContactWriteSerializer(WriteSerializer):
             org_fields = self.context['contact_fields']
 
             for field_key, field_val in value.items():
+                if field_key in Contact.RESERVED_FIELDS:
+                    raise serializers.ValidationError("Invalid contact field key: '%s' is a reserved word" % field_key)
                 for field in org_fields:
                     # TODO get users to stop writing fields via labels
                     if field.key == field_key or field.label == field_key:
@@ -483,8 +487,11 @@ class ContactWriteSerializer(WriteSerializer):
         if self.parsed_urns is not None:
             # look up these URNs, keeping track of the contacts that are connected to them
             urn_contacts = set()
+            country = self.org.get_country_code()
+
             for parsed_urn in self.parsed_urns:
-                urn = ContactURN.objects.filter(org=self.org, urn__exact=parsed_urn).first()
+                normalized_urn = URN.normalize(parsed_urn, country)
+                urn = ContactURN.objects.filter(org=self.org, urn__exact=normalized_urn).first()
                 if urn and urn.contact:
                     urn_contacts.add(urn.contact)
 
@@ -634,7 +641,7 @@ class ContactBulkActionSerializer(WriteSerializer):
         elif action == self.REMOVE:
             self.group_obj.update_contacts(self.user, contacts, add=False)
         elif action == self.EXPIRE:
-            FlowRun.expire_all_for_contacts(contacts)
+            FlowRun.exit_all_for_contacts(contacts, FlowRun.EXIT_TYPE_EXPIRED)
         elif action == self.ARCHIVE:
             Msg.archive_all_for_contacts(contacts)
         else:
@@ -1084,19 +1091,16 @@ class FlowWriteSerializer(WriteSerializer):
         """
         flow_json = self.validated_data
 
-        # first, migrate our definition forward if necessary
-        version = flow_json.get('version', CURRENT_EXPORT_VERSION)
-        if version < CURRENT_EXPORT_VERSION:
-            flow_json = FlowRevision.migrate_definition(flow_json, version, CURRENT_EXPORT_VERSION)
+        if 'metadata' not in flow_json:
+            flow_json['metadata'] = dict(name=flow_json.get('name', None), uuid=flow_json.get('uuid', None))
 
         # previous to version 7, uuid could be supplied on the outer element
         uuid = flow_json.get('metadata').get('uuid', flow_json.get('uuid', None))
         name = flow_json.get('metadata').get('name')
 
         if uuid:
-            flow = Flow.objects.get(org=self.org, uuid=uuid)
+            flow = Flow.objects.filter(org=self.org, uuid=uuid).first()
             flow.name = name
-
             flow_type = flow_json.get('flow_type', None)
             if flow_type:
                 flow.flow_type = flow_type
@@ -1105,6 +1109,11 @@ class FlowWriteSerializer(WriteSerializer):
         else:
             flow_type = flow_json.get('flow_type', Flow.FLOW)
             flow = Flow.create(self.org, self.user, name, flow_type)
+
+        # first, migrate our definition forward if necessary
+        version = flow_json.get('version', CURRENT_EXPORT_VERSION)
+        if version < CURRENT_EXPORT_VERSION:
+            flow_json = FlowRevision.migrate_definition(flow_json, flow, version, CURRENT_EXPORT_VERSION)
 
         flow.update(flow_json, self.user, force=True)
         return flow
@@ -1239,7 +1248,7 @@ class FlowRunWriteSerializer(WriteSerializer):
         definition = json.loads(flow_revision.definition)
 
         # make sure we are operating off a current spec
-        definition = FlowRevision.migrate_definition(definition, self.flow_obj.version_number, CURRENT_EXPORT_VERSION)
+        definition = FlowRevision.migrate_definition(definition, self.flow_obj, self.flow_obj.version_number, CURRENT_EXPORT_VERSION)
 
         for step in steps:
             node_obj = None
@@ -1369,7 +1378,7 @@ class FlowRunStartSerializer(WriteSerializer):
 
         if value:
             # check that we have some way of sending messages
-            channel = self.org.get_channel_for_role(SEND, TEL_SCHEME)
+            channel = self.org.get_channel_for_role(Channel.ROLE_SEND, TEL_SCHEME)
 
             # get our country
             country = self.org.get_country_code()
@@ -1436,7 +1445,7 @@ class BoundarySerializer(ReadSerializer):
         return obj.parent.osm_id if obj.parent else None
 
     def get_geometry(self, obj):
-        return json.loads(obj.simplified_geometry.geojson)
+        return json.loads(obj.simplified_geometry.geojson) if obj.simplified_geometry else None
 
     def get_boundary(self, obj):
         return obj.osm_id
@@ -1699,7 +1708,7 @@ class ChannelEventSerializer(ReadSerializer):
         return obj.contact.uuid
 
     def get_phone(self, obj):
-        return obj.contact.get_urn_display(org=obj.org, scheme=TEL_SCHEME, full=True)
+        return obj.contact.get_urn_display(org=obj.org, scheme=TEL_SCHEME, formatted=False)
 
     def get_call(self, obj):
         return obj.pk

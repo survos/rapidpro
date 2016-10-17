@@ -5,16 +5,17 @@ from django.db import models
 from django.db.models import Model
 from django.utils import timezone
 from django.utils.translation import ugettext_lazy as _
-from smartmin.models import SmartModel
 from temba.contacts.models import ContactGroup, ContactField, Contact
 from temba.flows.models import Flow
 from temba.orgs.models import Org
-from temba.utils.models import generate_uuid
+from temba.utils.models import TembaModel
 from temba.values.models import Value
 
 
-class Campaign(SmartModel):
-    name = models.CharField(max_length=255,
+class Campaign(TembaModel):
+    MAX_NAME_LEN = 255
+
+    name = models.CharField(max_length=MAX_NAME_LEN,
                             help_text="The name of this campaign")
     group = models.ForeignKey(ContactGroup,
                               help_text="The group this campaign operates on")
@@ -22,9 +23,6 @@ class Campaign(SmartModel):
                                       help_text="Whether this campaign is archived or not")
     org = models.ForeignKey(Org,
                             help_text="The organization this campaign exists for")
-
-    uuid = models.CharField(max_length=36, unique=True, default=generate_uuid,
-                            verbose_name=_("Unique Identifier"), help_text=_("The unique identifier for this object"))
 
     @classmethod
     def create(cls, org, user, name, group):
@@ -75,12 +73,12 @@ class Campaign(SmartModel):
 
                 # first check if we have the objects by id
                 if same_site:
-                    group = ContactGroup.user_groups.filter(id=campaign_spec['group']['id'], org=org).first()
+                    group = ContactGroup.user_groups.filter(uuid=campaign_spec['group']['uuid'], org=org).first()
                     if group:
                         group.name = campaign_spec['group']['name']
                         group.save()
 
-                    campaign = Campaign.objects.filter(org=org, id=campaign_spec['id']).first()
+                    campaign = Campaign.objects.filter(org=org, uuid=campaign_spec['uuid']).first()
                     if campaign:
                         campaign.name = Campaign.get_unique_name(org, name, ignore=campaign)
                         campaign.save()
@@ -126,7 +124,7 @@ class Campaign(SmartModel):
                                                                    event_spec['delivery_hour'])
                         event.update_flow_name()
                     else:
-                        flow = Flow.objects.filter(org=org, is_active=True, id=event_spec['flow']['id']).first()
+                        flow = Flow.objects.filter(org=org, is_active=True, uuid=event_spec['flow']['uuid']).first()
                         if flow:
                             CampaignEvent.create_flow_event(org, user, campaign, relative_to,
                                                             event_spec['offset'],
@@ -165,17 +163,17 @@ class Campaign(SmartModel):
         A json representation of this event, suitable for export. Note this only returns the ids and names
         of the dependent flows. You will want to export these flows seperately using get_all_flows()
         """
-        definition = dict(name=self.name, id=self.pk, group=dict(id=self.group.id, name=self.group.name))
+        definition = dict(name=self.name, uuid=self.uuid, group=dict(uuid=self.group.uuid, name=self.group.name))
         events = []
 
-        for event in self.events.all().order_by('flow__id'):
-            events.append(dict(id=event.pk, offset=event.offset,
+        for event in self.events.all().order_by('flow__uuid'):
+            events.append(dict(uuid=event.uuid, offset=event.offset,
                                unit=event.unit,
                                event_type=event.event_type,
                                delivery_hour=event.delivery_hour,
                                message=event.message,
-                               flow=dict(id=event.flow.pk, name=event.flow.name),
-                               relative_to=dict(label=event.relative_to.label, key=event.relative_to.key, id=event.relative_to.pk)))
+                               flow=dict(uuid=event.flow.uuid, name=event.flow.name),
+                               relative_to=dict(label=event.relative_to.label, key=event.relative_to.key)))
         definition['events'] = events
         return definition
 
@@ -202,7 +200,7 @@ class Campaign(SmartModel):
         return self.name
 
 
-class CampaignEvent(SmartModel):
+class CampaignEvent(TembaModel):
     """
     An event within a campaign that can send a message to a contact or start them in a flow
     """
@@ -245,9 +243,6 @@ class CampaignEvent(SmartModel):
     message = models.TextField(help_text="The message to send out", null=True, blank=True)
 
     delivery_hour = models.IntegerField(default=-1, help_text="The hour to send the message or flow at.")
-
-    uuid = models.CharField(max_length=36, unique=True, default=generate_uuid,
-                            verbose_name=_("Unique Identifier"), help_text=_("The unique identifier for this object"))
 
     @classmethod
     def create_message_event(cls, org, user, campaign, relative_to, offset, unit, message, delivery_hour=-1):

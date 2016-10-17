@@ -23,7 +23,7 @@ django-redis==3.1.5
 redis==2.10.1
 BeautifulSoup
 xlutils
-phonenumbers==7.1.0
+phonenumbers
 django-countries==3.0.1
 djangorestframework
 djangorestframework-xml
@@ -62,4 +62,7 @@ rapidpro-expressions
 python-telegram-bot
 -e git+http://github.com/nyaruka/python-librato-bg.git#egg=librato_bg
 django-mptt==0.7.4
-
+openpyxl
+django-excel
+pyexcel-xls
+pyexcel-xlsx
