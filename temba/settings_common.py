@@ -268,6 +268,7 @@ BRANDING = {
         'name': 'Survos',
         'org': 'Survos LLC',
         'styles': ['brands/survos/font/style.css', 'brands/survos/less/style.less'],
+        'signup_text': 'Create Account',
         'welcome_topup': 1000,
         'email': 'join@survos.net',
         'support_email': 'support@survos.net',
@@ -275,18 +276,41 @@ BRANDING = {
         'api_link': 'https://api.survos.net',
         'docs_link': 'http://knowledge.rapidpro.io',
         'domain': 'rapidpro.survos.net',
-        'favico': 'brands/survos/favico.ico',
+        'favico': 'brands/rapidpro/rapidpro.ico',
         'splash': '/brands/survos/splash.jpg',
         'logo': '/brands/survos/logo.png',
         'allow_signups': True,
         'welcome_packs': [dict(size=5000, name="Demo Account"), dict(size=100000, name="Survos Client")],
         'description': _("Build scheduled SMS surveys to interact with your study participants"),
-        'credits': _("RapidPro is Copyright &copy; 2012-2015 UNICEF, Nyaruka. All Rights Reserved.  Some modification by Survos LLC")
+        'credits': _("RapidPro is Copyright &copy; 2012-2015 UNICEF, Nyaruka. All Rights Reserved. Some modification by Survos LLC")
+    },
+    'nyumhealth.io': {
+        'slug': 'nyumhealth',
+        'name': 'NYU mHealth',
+        'logo_name': 'NYU mHealth',
+        'org': 'NYU mHealth',
+        'styles': ['brands/survos/font/style.css', 'brands/nyumhealth/less/style.less'],
+        'signup_text': 'Try if for Free',
+        'welcome_topup': 1000,
+        'email': 'join@survos.net',
+        'support_email': 'support@survos.net',
+        'link': 'https://rapidpro.survos.net',
+        'api_link': 'https://api.survos.net',
+        'docs_link': 'http://knowledge.rapidpro.io',
+        'domain': 'rapidpro.survos.net',
+        'favico': 'brands/nyumhealth/icon.png',
+        'splash': '/brands/nyumhealth/splash.png',
+        'logo': '/brands/nyumhealth/logo.png',
+        'allow_signups': True,
+        'welcome_packs': [dict(size=5000, name="Demo Account"), dict(size=100000, name="Survos Client")],
+        'description': _("Ecological Momentary Assessment: Mobile Surveys in Place"),
+        'credits': _("RapidPro is Copyright &copy; 2012-2015 UNICEF, Nyaruka. All Rights Reserved. Some modification by Survos LLC")
     },
     'rapidpro.io': {
         'slug': 'rapidpro',
         'name': 'RapidPro',
         'org': 'UNICEF',
+        'signup_text': 'Create Account',
         'styles': ['brands/rapidpro/font/style.css', 'brands/rapidpro/less/style.less'],
         'welcome_topup': 1000,
         'email': 'join@rapidpro.io',
@@ -304,7 +328,7 @@ BRANDING = {
         'credits': _("Copyright &copy; 2012-2015 UNICEF, Nyaruka. All Rights Reserved.")
     }
 }
-DEFAULT_BRAND = 'survos.io'
+DEFAULT_BRAND = 'nyumhealth.io'
 
 # -----------------------------------------------------------------------------------
 # Directory Configuration
@@ -879,7 +903,7 @@ AUTHENTICATION_BACKENDS = (
     'guardian.backends.ObjectPermissionBackend',
 )
 
-ANONYMOUS_USER_ID = -1
+ANONYMOUS_USER_NAME = 'AnonymousUser'
 
 # -----------------------------------------------------------------------------------
 # Our test runner is standard but with ability to exclude apps

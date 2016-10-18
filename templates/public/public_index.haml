@@ -45,6 +45,7 @@
       #splash
         %h1.description
           {{ brand.description }}
+        %span#splash_image
 
     .row
       #lead-form
@@ -57,7 +58,7 @@
                 %nobr
                   %input.controls{'type':"text", 'name':"email", 'placeholder':"Enter your email.."}
                   %button.btn.btn-success{type:"submit"}
-                    -trans "Create Account"
+                    {{ brand.signup_text}}
         -if errors
           %p.text-error {{error_msg}}
 
