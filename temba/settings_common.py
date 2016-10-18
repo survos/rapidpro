@@ -328,7 +328,7 @@ BRANDING = {
         'credits': _("Copyright &copy; 2012-2015 UNICEF, Nyaruka. All Rights Reserved.")
     }
 }
-DEFAULT_BRAND = 'nyumhealth.io'
+DEFAULT_BRAND = os.environ.get('BRAND', 'rapidpro.io')
 
 # -----------------------------------------------------------------------------------
 # Directory Configuration
@@ -904,6 +904,7 @@ AUTHENTICATION_BACKENDS = (
 )
 
 ANONYMOUS_USER_NAME = 'AnonymousUser'
+ANONYMOUS_USER_ID = -1
 
 # -----------------------------------------------------------------------------------
 # Our test runner is standard but with ability to exclude apps
