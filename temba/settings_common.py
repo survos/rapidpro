@@ -294,7 +294,7 @@ BRANDING = {
         'welcome_topup': 1000,
         'email': 'join@survos.net',
         'support_email': 'support@survos.net',
-        'link': 'https://rapidpro.survos.net',
+        'link': 'http://ema.nyumhealth.org',
         'api_link': 'https://api.survos.net',
         'docs_link': 'http://knowledge.rapidpro.io',
         'domain': 'ema.nyumhealth.org',
