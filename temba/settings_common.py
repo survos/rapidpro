@@ -297,7 +297,7 @@ BRANDING = {
         'link': 'https://rapidpro.survos.net',
         'api_link': 'https://api.survos.net',
         'docs_link': 'http://knowledge.rapidpro.io',
-        'domain': 'rapidpro.survos.net',
+        'domain': 'ema.nyumhealth.org',
         'favico': 'brands/nyumhealth/icon.png',
         'splash': '/brands/nyumhealth/splash.png',
         'logo': '/brands/nyumhealth/logo.png',
